@@ -1,0 +1,11 @@
+D:\yo\test2\final_project\final_project\obj\Debug\final_project.csproj.AssemblyReference.cache
+D:\yo\test2\final_project\final_project\obj\Debug\final_project.Properties.Resources.resources
+D:\yo\test2\final_project\final_project\obj\Debug\final_project.csproj.GenerateResource.cache
+D:\yo\test2\final_project\final_project\obj\Debug\final_project.csproj.CoreCompileInputs.cache
+D:\yo\test2\final_project\final_project\bin\Debug\final_project.exe.config
+D:\yo\test2\final_project\final_project\bin\Debug\final_project.exe
+D:\yo\test2\final_project\final_project\bin\Debug\final_project.pdb
+D:\yo\test2\final_project\final_project\obj\Debug\final_project.Form1.resources
+D:\yo\test2\final_project\final_project\obj\Debug\final_project.exe
+D:\yo\test2\final_project\final_project\obj\Debug\final_project.pdb
+D:\yo\test2\final_project\final_project\obj\Debug\final_project.exe.config
