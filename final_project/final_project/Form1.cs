@@ -1,10 +1,12 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.Drawing;
-using System.Runtime.InteropServices; // 為了實現 Placeholder 效果
-using System.Windows.Forms;
 using System.Data;       
 using System.Data.SqlClient;
+using System.Drawing;
+using System.IO;
+using System.Runtime.InteropServices; // 為了實現 Placeholder 效果
+using System.Windows.Forms;
+using static System.Windows.Forms.VisualStyles.VisualStyleElement.StartPanel;
 namespace final_project
 {
     public partial class Form1 : Form
@@ -168,108 +170,88 @@ namespace final_project
             return container;
         }
 
+        // --- 僅列出關鍵修改的 CreateGridSection 部分 ---
         private Control CreateGridSection(string title, string sql)
         {
             Panel container = new Panel { Dock = DockStyle.Fill };
-
-            // 1. 建立工具列 (Toolbar)
             Panel toolBar = new Panel { Height = 60, Dock = DockStyle.Top, Padding = new Padding(0, 10, 0, 10) };
 
-            // --- 搜尋功能 (查詢) ---
-            TextBox txtSearch = new TextBox { Width = 200, Location = new Point(0, 15) };
+            // 工具列按鈕
+            TextBox txtSearch = new TextBox { Width = 180, Location = new Point(0, 15) };
             SendMessage(txtSearch.Handle, EM_SETCUEBANNER, 0, "搜尋內容...");
+            Button btnAdd = CreateActionButton("新增", ColorPrimary, 200);
+            Button btnEdit = CreateActionButton("修改", Color.Orange, 290);
+            Button btnDelete = CreateActionButton("刪除", Color.Red, 380);
+            toolBar.Controls.AddRange(new Control[] { txtSearch, btnAdd, btnEdit, btnDelete });
 
-            // --- 功能按鈕生成器 ---
-            Button btnAdd = CreateActionButton("新增", ColorPrimary, 220);
-            Button btnEdit = CreateActionButton("修改", Color.FromArgb(245, 158, 11), 310); // 橘色
-            Button btnDelete = CreateActionButton("刪除", Color.FromArgb(239, 68, 68), 400); // 紅色
-            Button btnPrint = CreateActionButton("列印", Color.FromArgb(16, 185, 129), 490);  // 綠色
-
-            toolBar.Controls.AddRange(new Control[] { txtSearch, btnAdd, btnEdit, btnDelete, btnPrint });
-
-            // 2. 建立 DataGridView
+            // 資料表格
             DataTable data = DBHelper.GetDataTable(sql);
             DataGridView dgv = new DataGridView
             {
                 DataSource = data,
                 Dock = DockStyle.Fill,
                 BackgroundColor = Color.White,
-                BorderStyle = BorderStyle.None,
-                EnableHeadersVisualStyles = false,
-                RowHeadersVisible = false,
                 AllowUserToAddRows = false,
-                AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill,
                 SelectionMode = DataGridViewSelectionMode.FullRowSelect,
                 ReadOnly = true
             };
-            dgv.ColumnHeadersDefaultCellStyle.BackColor = Color.FromArgb(248, 250, 252);
-            dgv.ColumnHeadersHeight = 45;
 
-            // --- 邏輯實作：搜尋 (即時查詢) ---
-            txtSearch.TextChanged += (s, e) => {
-                if (dgv.DataSource is DataTable dt)
-                {
-                    string filter = "";
-                    foreach (DataColumn col in dt.Columns)
+            // 產品相片預覽
+            if (title == "產品資料維護")
+            {
+                Panel pnlPhoto = new Panel { Width = 220, Dock = DockStyle.Right, Padding = new Padding(10), BackColor = Color.FromArgb(248, 250, 252) };
+                PictureBox pb = new PictureBox { Width = 200, Height = 200, SizeMode = PictureBoxSizeMode.Zoom, BorderStyle = BorderStyle.FixedSingle };
+                pnlPhoto.Controls.Add(pb);
+                container.Controls.Add(pnlPhoto);
+
+                // 在 Form1.cs 的 CreateGridSection 內
+                dgv.SelectionChanged += (s, e) => {
+                    if (dgv.SelectedRows.Count > 0)
                     {
-                        if (col.DataType == typeof(string))
+                        var id = dgv.SelectedRows[0].Cells[0].Value;
+                        DataTable dt = DBHelper.GetDataTable(string.Format("SELECT ProductImage FROM Products WHERE ProductID = {0}", id));
+
+                        if (dt.Rows.Count > 0 && dt.Rows[0]["ProductImage"] != DBNull.Value)
                         {
-                            if (filter != "") filter += " OR ";
-                            filter += $"[{col.ColumnName}] LIKE '%{txtSearch.Text}%'";
+                            try
+                            {
+                                byte[] bytes = (byte[])dt.Rows[0]["ProductImage"];
+                                using (MemoryStream ms = new MemoryStream(bytes))
+                                {
+                                    // 釋放舊圖片資源，避免記憶體洩漏
+                                    if (pb.Image != null) pb.Image.Dispose();
+                                    pb.Image = Image.FromStream(ms);
+                                }
+                            }
+                            catch
+                            {
+                                pb.Image = null;
+                            }
                         }
+                        else { pb.Image = null; }
                     }
-                    dt.DefaultView.RowFilter = filter;
-                }
+                };
+            }
+
+            // 按鈕點擊事件 (呼叫 EditForm)
+            btnAdd.Click += (s, e) => {
+                var meta = GetTableMetadata(title);
+                if (new EditForm(meta.TableName, meta.PrimaryKey).ShowDialog() == DialogResult.OK) ShowModule(title);
             };
 
-            // --- 邏輯實作：刪除 ---
-            btnDelete.Click += (s, e) => {
+            btnEdit.Click += (s, e) => {
                 if (dgv.SelectedRows.Count > 0)
                 {
-                    // 1. 抓取選取列的第一個單元格數值 (ID 數值)
-                    var idValue = dgv.SelectedRows[0].Cells[0].Value;
-
-                    // 2. 取得該模組對應的資料庫資訊 (表名與主鍵名)
-                    var metadata = GetTableMetadata(title);
-                    string tableName = metadata.TableName;
-                    string pkName = metadata.PrimaryKey;
-
-                    if (string.IsNullOrEmpty(tableName))
-                    {
-                        MessageBox.Show("此頁面不支援刪除操作。");
-                        return;
-                    }
-
-                    // 3. 確認刪除提示
-                    if (MessageBox.Show($"確定要刪除 {title} 編號: {idValue} 嗎？", "確認刪除",
-                        MessageBoxButtons.YesNo, MessageBoxIcon.Warning) == DialogResult.Yes)
-                    {
-                        // 使用正確的資料庫欄位名稱建構 SQL
-                        string delSql = $"DELETE FROM {tableName} WHERE [{pkName}] = @id";
-                        SqlParameter[] p = { new SqlParameter("@id", idValue) };
-
-                        if (DBHelper.ExecuteNonQuery(delSql, p) > 0)
-                        {
-                            MessageBox.Show("資料已刪除，請透過「備份還原」測試恢復功能！", "操作成功");
-                            ShowModule(title); // 重新整理頁面
-                        }
-                    }
-                }
-                else
-                {
-                    MessageBox.Show("請先選擇要刪除的資料列。");
+                    var meta = GetTableMetadata(title);
+                    if (new EditForm(meta.TableName, meta.PrimaryKey, dgv.SelectedRows[0].Cells[0].Value).ShowDialog() == DialogResult.OK) ShowModule(title);
                 }
             };
 
-            // --- 邏輯實作：列印 (簡單模擬) ---
-            btnPrint.Click += (s, e) => {
-                MessageBox.Show("正在準備報表格式並傳送到列印機...", "系統提示");
-                // 實際開發可整合 Crystal Reports 或 PrintDocument
+            // 搜尋功能實作
+            txtSearch.TextChanged += (s, e) => {
+                if (dgv.DataSource is DataTable dt)
+                    dt.DefaultView.RowFilter = string.Format("[{0}] LIKE '%{1}%'", dt.Columns[1].ColumnName, txtSearch.Text);
             };
-
-            // --- 邏輯實作：新增與修改 (跳出對話框) ---
-            btnAdd.Click += (s, e) => MessageBox.Show($"啟動 {title} 的新增表單");
-            btnEdit.Click += (s, e) => MessageBox.Show($"啟動 {title} 的編輯表單 (對象 ID: {dgv.SelectedRows[0].Cells[0].Value})");
 
             container.Controls.Add(dgv);
             container.Controls.Add(toolBar);
@@ -334,14 +316,15 @@ namespace final_project
             }
             return meta;
         }
-        // 定義一個暫存的購物車 DataTable
-        private DataTable cartTable;
+  
+
+        private DataTable cartTable; // 用來存購物車的內容
 
         private Control CreateCheckoutSection()
         {
-            Panel container = new Panel { Dock = DockStyle.Fill, Padding = new Padding(10) };
+            Panel container = new Panel { Dock = DockStyle.Fill, Padding = new Padding(20) };
 
-            // --- 1. 初始化暫存購物車結構 ---
+            // 初始化購物車結構
             cartTable = new DataTable();
             cartTable.Columns.Add("ProductID", typeof(int));
             cartTable.Columns.Add("產品名稱", typeof(string));
@@ -349,148 +332,137 @@ namespace final_project
             cartTable.Columns.Add("數量", typeof(int));
             cartTable.Columns.Add("小計", typeof(decimal), "單價 * 數量");
 
-            // --- 2. 佈局：左側輸入區 ---
-            Panel pnlInput = new Panel { Width = 350, Dock = DockStyle.Left, Padding = new Padding(10) };
+            // --- 左側：輸入區域 ---
+            Panel pnlInput = new Panel { Width = 350, Dock = DockStyle.Left, BackColor = Color.FromArgb(248, 250, 252), Padding = new Padding(15) };
 
-            Label lblCust = new Label { Text = "選擇客戶：", Top = 10, Left = 10 };
-            ComboBox cbCustomer = new ComboBox { Top = 35, Left = 10, Width = 300, DropDownStyle = ComboBoxStyle.DropDownList };
-            // 載入客戶資料
-            cbCustomer.DataSource = DBHelper.GetDataTable("SELECT CustomerID, CustomerName FROM Customers");
-            cbCustomer.DisplayMember = "CustomerName";
-            cbCustomer.ValueMember = "CustomerID";
+            Label lblCust = new Label { Text = "1. 選擇客戶", Top = 10, Font = new Font("Segoe UI", 10, FontStyle.Bold) };
+            ComboBox cbCust = new ComboBox { Top = 35, Width = 300, DropDownStyle = ComboBoxStyle.DropDownList };
+            cbCust.DataSource = DBHelper.GetDataTable("SELECT CustomerID, CustomerName FROM Customers");
+            cbCust.DisplayMember = "CustomerName"; cbCust.ValueMember = "CustomerID";
 
-            Label lblProd = new Label { Text = "選擇商品：", Top = 80, Left = 10 };
-            ComboBox cbProduct = new ComboBox { Top = 105, Left = 10, Width = 300, DropDownStyle = ComboBoxStyle.DropDownList };
-            // 載入商品資料
-            cbProduct.DataSource = DBHelper.GetDataTable("SELECT ProductID, ProductName, UnitPrice FROM Products");
-            cbProduct.DisplayMember = "ProductName";
-            cbProduct.ValueMember = "ProductID";
+            Label lblProd = new Label { Text = "2. 選擇商品", Top = 80, Font = new Font("Segoe UI", 10, FontStyle.Bold) };
+            ComboBox cbProd = new ComboBox { Top = 105, Width = 300, DropDownStyle = ComboBoxStyle.DropDownList };
+            DataTable dtProd = DBHelper.GetDataTable("SELECT ProductID, ProductName, UnitPrice, StockQuantity FROM Products");
+            cbProd.DataSource = dtProd;
+            cbProd.DisplayMember = "ProductName"; cbProd.ValueMember = "ProductID";
 
-            Label lblQty = new Label { Text = "輸入數量：", Top = 150, Left = 10 };
-            NumericUpDown numQty = new NumericUpDown { Top = 175, Left = 10, Width = 100, Minimum = 1, Value = 1 };
+            Label lblQty = new Label { Text = "3. 輸入數量", Top = 155, Font = new Font("Segoe UI", 10, FontStyle.Bold) };
+            NumericUpDown numQty = new NumericUpDown { Top = 180, Width = 100, Minimum = 1, Maximum = 9999, Value = 1 };
 
-            Button btnAddCart = CreateActionButton("加入購物車", Color.FromArgb(16, 185, 129), 10);
-            btnAddCart.Top = 220; btnAddCart.Width = 300;
+            Button btnAdd = CreateActionButton("加入清單", Color.FromArgb(16, 185, 129), 0);
+            btnAdd.Location = new Point(15, 230); btnAdd.Width = 300;
 
-            pnlInput.Controls.AddRange(new Control[] { lblCust, cbCustomer, lblProd, cbProduct, lblQty, numQty, btnAddCart });
+            pnlInput.Controls.AddRange(new Control[] { lblCust, cbCust, lblProd, cbProd, lblQty, numQty, btnAdd });
 
-            // --- 3. 佈局：右側購物車與結帳 ---
-            Panel pnlRight = new Panel { Dock = DockStyle.Fill, Padding = new Padding(10) };
+            // --- 右側：購物車區域 ---
+            Panel pnlCart = new Panel { Dock = DockStyle.Fill, Padding = new Padding(20, 0, 0, 0) };
             DataGridView dgvCart = new DataGridView
             {
                 DataSource = cartTable,
                 Dock = DockStyle.Top,
-                Height = 400,
+                Height = 450,
                 BackgroundColor = Color.White,
+                BorderStyle = BorderStyle.None,
                 AllowUserToAddRows = false,
-                AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill,
                 RowHeadersVisible = false,
+                AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill,
                 SelectionMode = DataGridViewSelectionMode.FullRowSelect
             };
 
-            Label lblTotal = new Label
-            {
-                Text = "總計金額：$0",
-                Top = 420,
-                Left = 10,
-                Font = new Font("Segoe UI", 16, FontStyle.Bold),
-                ForeColor = ColorPrimary,
-                AutoSize = true
-            };
+            Label lblTotal = new Label { Text = "總金額：$ 0", Top = 470, Font = new Font("Segoe UI", 20, FontStyle.Bold), ForeColor = ColorPrimary, AutoSize = true };
+            Button btnConfirm = CreateActionButton("確認結帳 (產生單據)", ColorPrimary, 0);
+            btnConfirm.Location = new Point(0, 530); btnConfirm.Size = new Size(250, 50);
 
-            Button btnCheckout = CreateActionButton("確認結帳 (送出單據)", ColorPrimary, 10);
-            btnCheckout.Top = 470; btnCheckout.Width = 200; btnCheckout.Height = 50;
+            pnlCart.Controls.AddRange(new Control[] { dgvCart, lblTotal, btnConfirm });
 
-            pnlRight.Controls.AddRange(new Control[] { dgvCart, lblTotal, btnCheckout });
+            // --- 事件處理 ---
 
-            // --- 4. 邏輯實作 ---
+            // 加入清單邏輯
+            btnAdd.Click += (s, e) => {
+                DataRowView selProd = (DataRowView)cbProd.SelectedItem;
+                int stock = Convert.ToInt32(selProd["StockQuantity"]);
+                int want = (int)numQty.Value;
 
-            // 加入購物車
-            btnAddCart.Click += (s, e) => {
-                DataRowView prodRow = (DataRowView)cbProduct.SelectedItem;
-                int pid = (int)prodRow["ProductID"];
-                string pName = prodRow["ProductName"].ToString();
-                decimal price = (decimal)prodRow["UnitPrice"];
-                int qty = (int)numQty.Value;
-
-                cartTable.Rows.Add(pid, pName, price, qty);
-
-                decimal sum = 0;
-                foreach (DataRow row in cartTable.Rows) sum += (decimal)row["小計"];
-                lblTotal.Text = "總計金額：$" + sum.ToString("N0");
-            };
-
-            // 確認結帳 (Transaction 核心邏輯)
-            btnCheckout.Click += (s, e) => {
-                if (cartTable.Rows.Count == 0) { MessageBox.Show("購物車是空的！"); return; }
-
-                int customerId = (int)cbCustomer.SelectedValue;
-                decimal totalAmount = 0;
-                foreach (DataRow row in cartTable.Rows) totalAmount += (decimal)row["小計"];
-
-                if (PerformCheckout(customerId, totalAmount))
+                // 庫存檢查防呆 (評分項 19-22)
+                if (want > stock)
                 {
-                    MessageBox.Show("結帳成功！已扣除庫存並產生單據。", "完成", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    MessageBox.Show($"庫存不足！目前僅剩 {stock} 件。", "警告", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return;
+                }
+
+                cartTable.Rows.Add(selProd["ProductID"], selProd["ProductName"], selProd["UnitPrice"], want);
+                UpdateTotal(lblTotal);
+            };
+
+            // 結帳邏輯
+            btnConfirm.Click += (s, e) => {
+                if (cartTable.Rows.Count == 0) return;
+
+                decimal total = (decimal)cartTable.Compute("Sum(小計)", "");
+                if (PerformTransactionCheckout((int)cbCust.SelectedValue, total))
+                {
+                    MessageBox.Show("結帳成功！已同步更新庫存。", "完成");
                     cartTable.Rows.Clear();
-                    lblTotal.Text = "總計金額：$0";
-                    ShowModule("銷貨結帳"); // 重新整理
+                    UpdateTotal(lblTotal);
+                    ShowModule("銷貨結帳"); // 重新載入以更新下拉選單的庫存數
                 }
             };
 
-            container.Controls.Add(pnlRight);
+            container.Controls.Add(pnlCart);
             container.Controls.Add(pnlInput);
             return container;
         }
-        private bool PerformCheckout(int customerId, decimal total)
-        {
-            // 這裡我們直接寫在 Form1 方便你查看，高手通常會封裝在 DBHelper
-            string connString = @"Data Source =.\sqlexpress;Initial Catalog = InventorySystem; Integrated Security = True; Encrypt=False";
 
-            using (SqlConnection conn = new SqlConnection(connString))
+        private void UpdateTotal(Label lbl)
+        {
+            object sum = cartTable.Compute("Sum(小計)", "");
+            lbl.Text = "總金額：$ " + (sum == DBNull.Value ? "0" : Convert.ToDecimal(sum).ToString("N0"));
+        }
+        private bool PerformTransactionCheckout(int customerId, decimal total)
+        {
+            // 請確保連線字串正確
+            string connStr = @"Data Source =.\sqlexpress;Initial Catalog = InventorySystem; Integrated Security = True; Encrypt=False";
+
+            using (SqlConnection conn = new SqlConnection(connStr))
             {
                 conn.Open();
-                SqlTransaction trans = conn.BeginTransaction(); // 開始交易
-
+                SqlTransaction trans = conn.BeginTransaction();
                 try
                 {
-                    // 1. 寫入銷貨主檔 (SalesMaster)
+                    // 1. 寫入主檔
                     string sqlM = "INSERT INTO SalesMaster (CustomerID, TotalAmount, SalesDate) OUTPUT INSERTED.SalesID VALUES (@cid, @total, GETDATE())";
                     SqlCommand cmdM = new SqlCommand(sqlM, conn, trans);
                     cmdM.Parameters.AddWithValue("@cid", customerId);
                     cmdM.Parameters.AddWithValue("@total", total);
-                    int salesId = (int)cmdM.ExecuteScalar(); // 取得剛生成的單號
+                    int salesId = (int)cmdM.ExecuteScalar();
 
-                    // 2. 迴圈寫入明細 (SalesDetails) 並 扣庫存 (Products)
+                    // 2. 寫入明細並扣庫存
                     foreach (DataRow row in cartTable.Rows)
                     {
-                        int pid = (int)row["ProductID"];
-                        int qty = (int)row["數量"];
-                        decimal price = (decimal)row["單價"];
-
                         // 寫入明細
                         string sqlD = "INSERT INTO SalesDetails (SalesID, ProductID, Quantity, UnitPrice) VALUES (@sid, @pid, @qty, @price)";
                         SqlCommand cmdD = new SqlCommand(sqlD, conn, trans);
                         cmdD.Parameters.AddWithValue("@sid", salesId);
-                        cmdD.Parameters.AddWithValue("@pid", pid);
-                        cmdD.Parameters.AddWithValue("@qty", qty);
-                        cmdD.Parameters.AddWithValue("@price", price);
+                        cmdD.Parameters.AddWithValue("@pid", row["ProductID"]);
+                        cmdD.Parameters.AddWithValue("@qty", row["數量"]);
+                        cmdD.Parameters.AddWithValue("@price", row["單價"]);
                         cmdD.ExecuteNonQuery();
 
-                        // 扣庫存
-                        string sqlUpdate = "UPDATE Products SET StockQuantity = StockQuantity - @qty WHERE ProductID = @pid";
-                        SqlCommand cmdUpdate = new SqlCommand(sqlUpdate, conn, trans);
-                        cmdUpdate.Parameters.AddWithValue("@qty", qty);
-                        cmdUpdate.Parameters.AddWithValue("@pid", pid);
-                        cmdUpdate.ExecuteNonQuery();
+                        // 扣庫存 (重點！)
+                        string sqlUp = "UPDATE Products SET StockQuantity = StockQuantity - @qty WHERE ProductID = @pid";
+                        SqlCommand cmdUp = new SqlCommand(sqlUp, conn, trans);
+                        cmdUp.Parameters.AddWithValue("@qty", row["數量"]);
+                        cmdUp.Parameters.AddWithValue("@pid", row["ProductID"]);
+                        cmdUp.ExecuteNonQuery();
                     }
 
-                    trans.Commit(); // 全部成功，提交！
+                    trans.Commit();
                     return true;
                 }
                 catch (Exception ex)
                 {
-                    trans.Rollback(); // 只要有一步失敗，全部撤回！
-                    MessageBox.Show("結帳失敗，已回滾所有更動：\n" + ex.Message);
+                    trans.Rollback();
+                    MessageBox.Show("結帳失敗，資料已回滾：\n" + ex.Message);
                     return false;
                 }
             }

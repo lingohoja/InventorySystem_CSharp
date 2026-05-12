@@ -7,10 +7,8 @@ namespace final_project
 {
     public static class DBHelper
     {
-    
-        private static string connString = @"Data Source =.\sqlexpress;Initial Catalog = InventorySystem; Integrated Security = True; Encrypt=False";
+        private static string connString = @"Data Source=.\sqlexpress;Initial Catalog=InventorySystem;Integrated Security=True;Encrypt=False";
 
-        // 核心功能：讀取資料並回傳 DataTable (給 DataGridView 使用)
         public static DataTable GetDataTable(string sql)
         {
             DataTable dt = new DataTable();
@@ -24,11 +22,11 @@ namespace final_project
             }
             catch (Exception ex)
             {
-                MessageBox.Show("資料庫讀取失敗：\n" + ex.Message, "系統錯誤", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                MessageBox.Show("資料庫讀取失敗：\n" + ex.Message);
             }
             return dt;
         }
-        // 核心功能：執行 新增/修改/刪除 指令
+
         public static int ExecuteNonQuery(string sql, SqlParameter[] parameters = null)
         {
             try
@@ -43,7 +41,7 @@ namespace final_project
             }
             catch (Exception ex)
             {
-                MessageBox.Show("執行錯誤：" + ex.Message);
+                MessageBox.Show("指令執行失敗：\n" + ex.Message);
                 return -1;
             }
         }
