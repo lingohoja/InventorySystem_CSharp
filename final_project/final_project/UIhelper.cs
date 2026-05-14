@@ -7,9 +7,8 @@ namespace final_project
 {
     public static class UIHelper
     {
-        // ==========================================
-        //  黑科技：輸入框的 Placeholder (提示文字)
-        // ==========================================
+        
+        //輸入框的 Placeholder
         [DllImport("user32.dll", CharSet = CharSet.Auto)]
         private static extern Int32 SendMessage(IntPtr hWnd, int msg, int wParam, [MarshalAs(UnmanagedType.LPWStr)] string lParam);
         private const int EM_SETCUEBANNER = 0x1501;
@@ -19,9 +18,9 @@ namespace final_project
             SendMessage(textBox.Handle, EM_SETCUEBANNER, 0, placeholderText);
         }
 
-        // ==========================================
-        //  UI 封裝：通用按鈕樣式
-        // ==========================================
+      
+        //通用按鈕樣式
+      
         public static Button CreateStyledButton(string text, Color bgColor, int width = 120, int height = 40)
         {
             Button btn = new Button
@@ -34,13 +33,10 @@ namespace final_project
                 Cursor = Cursors.Hand,
                 Font = new Font("Microsoft JhengHei UI", 10, FontStyle.Regular)
             };
-            btn.FlatAppearance.BorderSize = 0; // 去除醜醜的邊框
+            btn.FlatAppearance.BorderSize = 0; // 去除邊框
             return btn;
-        }
-
-        // ==========================================
-        //  UI 封裝：通用 DataGridView 表格樣式
-        // ==========================================
+        }    
+        //  通用 DataGridView 表格樣式
         public static void SetGridStyle(DataGridView dgv)
         {
             dgv.BackgroundColor = Color.White;
@@ -57,12 +53,14 @@ namespace final_project
             dgv.ColumnHeadersDefaultCellStyle.ForeColor = Color.FromArgb(30, 41, 59);
             dgv.ColumnHeadersDefaultCellStyle.Font = new Font("Microsoft JhengHei UI", 10, FontStyle.Bold);
             dgv.ColumnHeadersDefaultCellStyle.Alignment = DataGridViewContentAlignment.MiddleCenter;
-
+            
             // 資料列美化
             dgv.DefaultCellStyle.Font = new Font("Microsoft JhengHei UI", 10, FontStyle.Regular);
             dgv.DefaultCellStyle.SelectionBackColor = Color.FromArgb(224, 231, 255); // 柔和的選取藍色
             dgv.DefaultCellStyle.SelectionForeColor = Color.FromArgb(30, 41, 59);
             dgv.RowTemplate.Height = 40; // 增加列高讓畫面不擁擠
+            dgv.ReadOnly = true;
+            
         }
     }
 }

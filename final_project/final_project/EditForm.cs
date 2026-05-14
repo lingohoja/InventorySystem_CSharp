@@ -34,7 +34,6 @@ namespace final_project
         {
             _flowPanel = new FlowLayoutPanel { Dock = DockStyle.Fill, Padding = new Padding(20), AutoScroll = true };
 
-            // 取得欄位型態架構
             DataTable schema = DBHelper.GetDataTable($"SELECT TOP 0 * FROM {_tableName}");
             DataRow oldRow = null;
             if (_isEdit)
@@ -45,19 +44,53 @@ namespace final_project
 
             foreach (DataColumn col in schema.Columns)
             {
-                if (col.AutoIncrement || col.ColumnName == _pkName) continue;
+                // 1. 隱藏主鍵、自動遞增，以及「系統計算欄位(SubTotal)」避免 UPDATE 報錯
+                if (col.AutoIncrement || col.ColumnName == _pkName || col.ColumnName == "SubTotal") continue;
 
                 _flowPanel.Controls.Add(new Label { Text = col.ColumnName, Width = 380, Margin = new Padding(0, 10, 0, 0) });
 
-                // 修正：針對二進位圖片欄位
-                if (col.DataType == typeof(byte[]) || col.ColumnName == "ProductImage")
+                // 判斷是否為「總額」或「日期」等不該讓使用者手動亂改的系統欄位
+                bool isSystemReadOnly = (_tableName.Contains("Master") && (col.ColumnName == "TotalAmount" || col.ColumnName == "SalesDate" || col.ColumnName == "PurchaseDate"));
+
+                // 2. 外鍵強制轉下拉選單
+                if (col.ColumnName.EndsWith("ID"))
+                {
+                    ComboBox cb = new ComboBox { Width = 380, DropDownStyle = ComboBoxStyle.DropDownList };
+                    string refTable = "", displayCol = "";
+
+                    if (col.ColumnName == "CustomerID") { refTable = "Customers"; displayCol = "CustomerName"; }
+                    else if (col.ColumnName == "ProductID") { refTable = "Products"; displayCol = "ProductName"; }
+                    else if (col.ColumnName == "SupplierID") { refTable = "Suppliers"; displayCol = "CompanyName"; }
+                    else if (col.ColumnName == "CategoryID") { refTable = "Categories"; displayCol = "CategoryName"; }
+                    else if (col.ColumnName == "SalesID") { refTable = "SalesMaster"; displayCol = "SalesID"; }
+                    else if (col.ColumnName == "PurchaseID") { refTable = "PurchaseMaster"; displayCol = "PurchaseID"; }
+
+                    if (refTable != "")
+                    {
+                        cb.DataSource = DBHelper.GetDataTable($"SELECT * FROM {refTable}");
+                        cb.DisplayMember = displayCol;
+                        cb.ValueMember = col.ColumnName;
+                        if (oldRow != null && oldRow[col.ColumnName] != DBNull.Value) cb.SelectedValue = oldRow[col.ColumnName];
+                    }
+                    _flowPanel.Controls.Add(cb);
+                    _controls.Add(col.ColumnName, cb);
+                }
+                // 3. 狀態欄位強制下拉選單
+                else if (col.ColumnName == "Status")
+                {
+                    ComboBox cbStatus = new ComboBox { Width = 380, DropDownStyle = ComboBoxStyle.DropDownList };
+                    cbStatus.Items.AddRange(new object[] { "已結帳", "處理中", "已退貨", "已取消" });
+                    if (oldRow != null && oldRow[col.ColumnName] != DBNull.Value) cbStatus.SelectedItem = oldRow[col.ColumnName].ToString();
+                    else cbStatus.SelectedIndex = 0;
+                    _flowPanel.Controls.Add(cbStatus);
+                    _controls.Add(col.ColumnName, cbStatus);
+                }
+                // 4. 照片處理
+                else if (col.DataType == typeof(byte[]) || col.ColumnName == "ProductImage")
                 {
                     PictureBox pb = new PictureBox { Width = 150, Height = 150, BorderStyle = BorderStyle.FixedSingle, SizeMode = PictureBoxSizeMode.Zoom };
                     Button btnLoad = new Button { Text = "上傳相片", Width = 100 };
-
-                    if (oldRow != null && oldRow[col.ColumnName] != DBNull.Value)
-                        pb.Image = ByteArrayToImage((byte[])oldRow[col.ColumnName]);
-
+                    if (oldRow != null && oldRow[col.ColumnName] != DBNull.Value) pb.Image = ByteArrayToImage((byte[])oldRow[col.ColumnName]);
                     btnLoad.Click += (s, e) => {
                         OpenFileDialog ofd = new OpenFileDialog { Filter = "圖片檔案|*.jpg;*.png;*.jpeg" };
                         if (ofd.ShowDialog() == DialogResult.OK) pb.Image = Image.FromFile(ofd.FileName);
@@ -66,17 +99,26 @@ namespace final_project
                     _flowPanel.Controls.Add(btnLoad);
                     _controls.Add(col.ColumnName, pb);
                 }
-                // 修正：針對日期欄位使用 DateTimePicker
+                // 5. 日期處理
                 else if (col.DataType == typeof(DateTime))
                 {
                     DateTimePicker dtp = new DateTimePicker { Width = 380, Format = DateTimePickerFormat.Custom, CustomFormat = "yyyy/MM/dd HH:mm" };
                     if (oldRow != null && oldRow[col.ColumnName] != DBNull.Value) dtp.Value = (DateTime)oldRow[col.ColumnName];
+                    dtp.Enabled = !isSystemReadOnly; // 鎖定不可改
                     _flowPanel.Controls.Add(dtp);
                     _controls.Add(col.ColumnName, dtp);
                 }
+                // 6. 一般文字/數字輸入框 (價格、數量、名稱等)
                 else
                 {
-                    TextBox txt = new TextBox { Width = 380, Text = oldRow != null ? oldRow[col.ColumnName].ToString() : "" };
+                    TextBox txt = new TextBox { Width = 380 };
+                    if (oldRow != null && oldRow[col.ColumnName] != DBNull.Value) txt.Text = oldRow[col.ColumnName].ToString();
+
+                    if (isSystemReadOnly)
+                    {
+                        txt.ReadOnly = true;
+                        txt.BackColor = Color.FromArgb(243, 244, 246); // 灰色代表鎖定
+                    }
                     _flowPanel.Controls.Add(txt);
                     _controls.Add(col.ColumnName, txt);
                 }
@@ -88,42 +130,29 @@ namespace final_project
             this.Controls.Add(_flowPanel);
         }
 
-        // 核心修正：根據控制項類型動態獲取值，徹底解決轉型失敗
-        // 1. 修正：建立 SQL 參數的邏輯 (解決轉型與 SQL 型態不符)
+        // --- 取值給 SQL 的邏輯 ---
         private SqlParameter CreateParameter(string name, Control c)
         {
-            // 處理圖片 (varbinary)
             if (c is PictureBox pb)
             {
                 SqlParameter sqlP = new SqlParameter("@" + name, SqlDbType.VarBinary);
-                if (pb.Image != null)
-                {
-                    sqlP.Value = ImageToByteArray(pb.Image);
-                }
-                else
-                {
-                    sqlP.Value = DBNull.Value; // 解決 CS8957 錯誤
-                }
+                sqlP.Value = pb.Image != null ? ImageToByteArray(pb.Image) : (object)DBNull.Value;
                 return sqlP;
             }
+            if (c is DateTimePicker dtp) return new SqlParameter("@" + name, dtp.Value);
 
-            // 處理日期 (解決 DateTimePicker 轉型 TextBox 失敗)
-            if (c is DateTimePicker dtp)
+            // 抓取 ComboBox 的 Value
+            if (c is ComboBox cb)
             {
-                return new SqlParameter("@" + name, dtp.Value);
+                if (cb.SelectedValue != null) return new SqlParameter("@" + name, cb.SelectedValue);
+                if (cb.SelectedItem != null) return new SqlParameter("@" + name, cb.SelectedItem.ToString());
+                return new SqlParameter("@" + name, DBNull.Value);
             }
 
-            // 處理文字 (TextBox)
-            if (c is TextBox txt)
-            {
-                return new SqlParameter("@" + name, (object)txt.Text ?? DBNull.Value);
-            }
+            if (c is TextBox txt) return new SqlParameter("@" + name, string.IsNullOrEmpty(txt.Text) ? DBNull.Value : (object)txt.Text);
 
             return new SqlParameter("@" + name, DBNull.Value);
         }
-
-        // 2. 修正：存檔主邏輯 (使用 string.Format 讓舊版 C# 更穩定)
-        // 1. 新增：檢查欄位是否填寫完整的方法
         private bool ValidateInputs()
         {
             foreach (var kvp in _controls)
